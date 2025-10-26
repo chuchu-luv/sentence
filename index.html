@@ -206,6 +206,8 @@
     function addClass(sel, cls){ var el = $(sel); if(el){ el.classList.add(cls); el.setAttribute('aria-hidden','false'); } }
     function removeClass(sel, cls){ var el = $(sel); if(el){ el.classList.remove(cls); el.setAttribute('aria-hidden','true'); } }
     function escapeHTML(str){ return String(str).replace(/[&<>"']/g, function(s){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[s] }); }
+    // 끝의 스페이스는 합산/정확도에서 제외
+    function trimTrailingSpaces(s){ s = String(s||''); var i=s.length; while(i>0 && s.charAt(i-1)===' ') i--; return s.slice(0,i); }
 
     // ---------- Alignment helpers ----------
     function alignOps(target, typed){
@@ -256,8 +258,9 @@
     function calcCpm(charCount, seconds){ var secs = Math.max(0, seconds||0); var mins = secs / 60; return mins > 0 ? Math.round(charCount / mins) : 0; }
 
     function calcAccuracy(target, typed){
-      // 최종 결과 계산용(완료 시): 삽입/삭제/치환 모두 오류로 계산
-      typed = typed || '';
+      // 최종: 끝 공백 무시 + 삽입/삭제/치환은 오류로 계산
+      target = target || '';
+      typed = trimTrailingSpaces(typed || '');
       if(target.length === 0 && typed.length === 0) return 100;
       var ops = alignOps(target, typed);
       var match = 0, errors = 0;
@@ -275,9 +278,10 @@
     }
 
     function calcAccuracyLive(target, typed){
-      // 실시간 표기용: 아직 입력하지 않은 글자(삭제 del)는 오류에 포함하지 않음
-      typed = typed || '';
-      if(typed.length === 0) return 100; // 시작은 100%
+      // 실시간: 아직 입력하지 않은 글자(del)는 오류로 세지 않고, 시작은 0%.
+      target = target || '';
+      typed = trimTrailingSpaces(typed || '');
+      if(typed.length === 0) return 0;
       var ops = alignOps(target, typed);
       var consumed = 0, correct = 0, errors = 0;
       for(var k=0;k<ops.length && consumed < typed.length; k++){
@@ -289,11 +293,11 @@
           consumed++;
           errors++;
         } else if(o.op === 'del'){
-          // 아직 입력 안한 글자: 실시간 정확도에서는 미반영
+          // 아직 미입력: 무시
         }
       }
       var total = correct + errors;
-      if(total === 0) return 100;
+      if(total === 0) return 0;
       return Math.max(0, Math.min(100, Math.round((correct/total)*100)));
     }
 
@@ -304,7 +308,7 @@
       return '천천히, 하지만 정확하게! 😊';
     }
 
-    // ---------- Data ----------
+    // ---------- Data (placeholder; will be replaced by CSV later) ----------
     var BOOKS = [
       { id: 'hedgehog', title: '미움을 파는 고슴도치', author: '슬라비 스토에프', ondok: 238, cover: 'https://image.yes24.com/goods/103073730/XL',
         sentences: [ '고슴도치는 미움을 팔았지만 누구도 행복하지 못했어요.', '진심 어린 말 한마디가 마음의 가시에 약이 되었지요.' ] },
@@ -372,44 +376,43 @@
 
     function renderGame(){
       state.screen = 'game'; var b = state.currentBook;
-      app.innerHTML = (
-        '<div class="container">\n' +
-          '<h1 class="title">사고도구어 한컴타자 · 문장</h1>\n' +
-          '<section class="panel">\n' +
-            '<div class="head-grid">\n' +
-              '<img class="cover" src="' + b.cover + '" alt="표지"/>\n' +
-              '<div class="book-meta">\n' +
-                '<div class="book-title">' + b.title + '</div>\n' +
-                '<div class="book-author">' + b.author + '</div>\n' +
-                '<div class="ondok-line">온독지수 <strong>' + b.ondok + '</strong></div>\n' +
-              '</div>\n' +
-              '<div class="stats-fixed">\n' +
-                '<div class="chip"><span class="lbl">시간(초)</span><span id="s-time" class="val">0</span></div>\n' +
-                '<div class="chip"><span class="lbl">글자 수</span><span id="s-chars" class="val">0</span></div>\n' +
-                '<div class="chip"><span class="lbl">정확도(%)</span><span id="s-acc" class="val">0</span></div>\n' +
-                '<div class="chip"><span class="lbl">타자속도(타/분)</span><span id="s-speed" class="val">0</span></div>\n' +
-              '</div>\n' +
-            '</div>\n' +
+      app.innerHTML = `
+        <div class="container">
+          <h1 class="title">사고도구어 한컴타자 · 문장</h1>
+          <section class="panel">
+            <div class="head-grid">
+              <img class="cover" src="${b.cover}" alt="표지"/>
+              <div class="book-meta">
+                <div class="book-title">${b.title}</div>
+                <div class="book-author">${b.author}</div>
+                <div class="ondok-line">온독지수 <strong>${b.ondok}</strong></div>
+              </div>
+              <div class="stats-fixed">
+                <div class="chip"><span class="lbl">시간(초)</span><span id="s-time" class="val">0</span></div>
+                <div class="chip"><span class="lbl">글자 수</span><span id="s-chars" class="val">0</span></div>
+                <div class="chip"><span class="lbl">정확도(%)</span><span id="s-acc" class="val">0</span></div>
+                <div class="chip"><span class="lbl">타자속도(타/분)</span><span id="s-speed" class="val">0</span></div>
+              </div>
+            </div>
 
-            '<div id="target" class="target" style="margin-top:6px"></div>\n' +
+            <div id="target" class="target" style="margin-top:6px"></div>
 
-            '<div class="row">\n' +
-              '<input id="typing" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="여기에 입력… (엔터: 결과)" />\n' +
-              '<button class="btn secondary" id="pauseBtn" title="일시 정지(P)">⏸ 일시정지</button>\n' +
-            '</div>\n' +
+            <div class="row">
+              <input id="typing" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="여기에 입력… (엔터: 결과)" />
+              <button class="btn secondary" id="pauseBtn" title="일시 정지(P)">⏸ 일시정지</button>
+            </div>
 
-            '<div class="nextbox">\n' +
-              '<span class="lbl">다음 문장 미리보기</span>\n' +
-              '<div id="nextSentence" class="sent"></div>\n' +
-            '</div>\n' +
+            <div class="nextbox">
+              <span class="lbl">다음 문장 미리보기</span>
+              <div id="nextSentence" class="sent"></div>
+            </div>
 
-            '<div class="row" style="justify-content:flex-end">\n' +
-              '<button class="btn neutral" id="restartBook">다시하기</button>\n' +
-              '<button class="btn pink" id="backBtn">처음으로</button>\n' +
-            '</div>\n' +
-          '</section>\n' +
-        '</div>'
-      );
+            <div class="row" style="justify-content:flex-end">
+              <button class="btn neutral" id="restartBook">다시하기</button>
+              <button class="btn pink" id="backBtn">처음으로</button>
+            </div>
+          </section>
+        </div>`;
 
       updateTargetHighlight('');
       setText('#nextSentence', getNextSentence());
@@ -461,18 +464,29 @@
 
     function updateTargetHighlight(typed){ var t = state.target; var targetEl = $('#target'); if(targetEl){ targetEl.innerHTML = diffMarkup(t, typed || ''); } }
 
-    function renderStats(typedVal){ var val = typedVal || ''; var secs = Math.max(0, state.seconds); var speed = calcCpm(val.length, secs); var acc = calcAccuracyLive(state.target, val); setText('#s-time', secs); setText('#s-chars', val.length); setText('#s-acc', acc); setText('#s-speed', speed); }
+    function renderStats(typedVal){
+      var raw = typedVal || '';
+      var val = trimTrailingSpaces(raw);
+      var secs = Math.max(0, state.seconds);
+      var speed = calcCpm(val.length, secs);
+      var acc = calcAccuracyLive(state.target, val);
+      setText('#s-time', secs);
+      setText('#s-chars', val.length);
+      setText('#s-acc', acc);
+      setText('#s-speed', speed);
+    }
 
     function startTimer(){ clearTimer(); state.timerId = setInterval(function(){ if(!state.isPaused && !state.finished){ var now = Date.now(); state.seconds = Math.floor((now - state.startedAt)/1000); var inputEl = $('#typing'); var val = inputEl ? inputEl.value : ''; renderStats(val); } }, 200); }
     function clearTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId = null; } }
 
     function finishRound(){
       var inputEl = $('#typing');
-      var val = inputEl ? inputEl.value : '';
-      var typedLen = val.length;
+      var raw = inputEl ? inputEl.value : '';
+      var eff = trimTrailingSpaces(raw);
+      var typedLen = eff.length;
       var secsNow = state.startedAt ? Math.max(1, Math.floor((Date.now() - state.startedAt)/1000)) : Math.max(1, state.seconds);
       var speedNow = calcCpm(typedLen, secsNow);
-      var accNow = calcAccuracy(state.target, val);
+      var accNow = calcAccuracy(state.target, eff);
       clearTimer(); state.finished = true; if(inputEl){ inputEl.disabled = true; }
       setText('#mTime', secsNow); setText('#mChars', typedLen); setText('#mSpeed', speedNow); setText('#mAcc', accNow);
       setText('#mMsg', feedback(accNow, speedNow));
@@ -507,7 +521,7 @@
       var accSpace = calcAccuracy('A B', 'AB');
       results.push(assert(accSpace === 66 || accSpace === 67, '띄어쓰기 누락(최종) → 정확도 < 100%'));
       // Live accuracy tests
-      results.push(assert(calcAccuracyLive('ABC','') === 100, 'Live: 시작은 100%'));
+      results.push(assert(calcAccuracyLive('ABC','') === 0, 'Live: 시작은 0%'));
       results.push(assert(calcAccuracyLive('AB CD','AB') === 100, 'Live: 앞부분만 정확히 입력 시 100%'));
       results.push(assert(calcAccuracyLive('ABC','AX') === 50, 'Live: 2글자 중 1글자 오타 → 50%'));
       var dm = diffMarkup('AB CD', 'ABX CD'); results.push(assert(dm.indexOf('class=\"err\"') > -1 && dm.indexOf('class=\"ok\"') > -1, 'diffMarkup 정렬 후 표시'));
